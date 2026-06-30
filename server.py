@@ -1,4 +1,4 @@
-import json, os, shutil, threading
+import json, os, shutil
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from fastapi import FastAPI, HTTPException
@@ -9,19 +9,16 @@ from gdrive_backup import backup_to_sheet, restore_from_sheet
 
 app = FastAPI()
 
-# CORS - cho phép frontend gọi từ mọi nguồn
+# CORS - allow all
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 DATA_FILE = Path("/data/scoreboard.json")
 DATA_FILE.parent.mkdir(parents=True, exist_ok=True)
 
-PASSWORD = "Vuiqua123!"
+PASSWORD = "***"
 VN_TZ = timezone(timedelta(hours=7))
 
-DEFAULT = {
-    "teacherName": "",
-    "students": []
-}
+DEFAULT = {"students": []}
 
 def load():
     try:
@@ -35,8 +32,6 @@ def save(data):
     with open(tmp, "w") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
     os.replace(tmp, DATA_FILE)
-    # Backup to Google Sheets in background (don't block response)
-    threading.Thread(target=backup_to_sheet, args=(data,), daemon=True).start()
 
 # ---------- Streak ----------
 def update_streak(student):
@@ -44,14 +39,10 @@ def update_streak(student):
     yesterday = (datetime.now(VN_TZ) - timedelta(days=1)).strftime("%Y-%m-%d")
     last = student.get("lastActive", "")
     streak = student.get("streak", 0) or 0
-
     if last == today:
-        return  # already logged today, no change
+        return
     student["lastActive"] = today
-    if last == yesterday:
-        student["streak"] = streak + 1
-    else:
-        student["streak"] = 1
+    student["streak"] = streak + 1 if last == yesterday else 1
 
 # ---------- Models ----------
 class AuthReq(BaseModel): password: str
@@ -60,6 +51,7 @@ class ScoreReq(BaseModel): studentId: str; delta: int
 class LevelReq(BaseModel): studentId: str; skill: str; level: int; delta: int
 class RenameReq(BaseModel): id: str; name: str
 class AvatarReq(BaseModel): id: str; avatar: str
+class SaveLoadReq(BaseModel): password: str
 
 # ---------- API ----------
 @app.post("/api/auth")
@@ -129,13 +121,36 @@ def rename_student(r: RenameReq):
 @app.post("/api/avatar")
 def update_avatar(a: AvatarReq):
     d = load()
-   s = next((x for x in d["students"] if x["id"] == a.id), None)
+    s = next((x for x in d["students"] if x["id"] == a.id), None)
     if s:
         s["avatar"] = a.avatar
         save(d)
     return {"ok": True}
 
-# Auto-restore from Google Sheets on startup if local file is empty/missing
+# ---------- Google Sheets Save/Load (password protected) ----------
+@app.post("/api/save-to-sheet")
+def save_to_sheet(req: SaveLoadReq):
+    if req.password != PASSWORD:
+        raise HTTPException(401, "Sai mật khẩu")
+    d = load()
+    ok = backup_to_sheet(d)
+    if ok:
+        # Also save last known good state locally
+        save(d)
+        return {"ok": True, "count": len(d.get("students", []))}
+    raise HTTPException(500, "Google Sheets save failed")
+
+@app.post("/api/load-from-sheet")
+def load_from_sheet(req: SaveLoadReq):
+    if req.password != PASSWORD:
+        raise HTTPException(401, "Sai mật khẩu")
+    restored = restore_from_sheet()
+    if restored:
+        save(restored)
+        return {"ok": True, "data": restored}
+    raise HTTPException(500, "Google Sheets load failed")
+
+# Auto-restore from Google Sheets on startup
 @app.on_event("startup")
 def startup_restore():
     try:
@@ -144,11 +159,10 @@ def startup_restore():
             restored = restore_from_sheet()
             if restored and restored.get("students"):
                 save(restored)
-                print("[startup] Restored data from Google Sheets backup")
+                print("[startup] Restored data from Google Sheets")
     except Exception as e:
         print(f"[startup] Restore error: {e}")
 
-# Health check
 @app.get("/health")
 def health():
     return {"status": "ok"}
