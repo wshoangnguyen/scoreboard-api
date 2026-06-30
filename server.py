@@ -1,10 +1,11 @@
-import json, os, shutil
+import json, os, shutil, threading
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from gdrive_backup import backup_to_sheet, restore_from_sheet
 
 app = FastAPI()
 
@@ -34,6 +35,8 @@ def save(data):
     with open(tmp, "w") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
     os.replace(tmp, DATA_FILE)
+    # Backup to Google Sheets in background (don't block response)
+    threading.Thread(target=backup_to_sheet, args=(data,), daemon=True).start()
 
 # ---------- Streak ----------
 def update_streak(student):
@@ -126,11 +129,24 @@ def rename_student(r: RenameReq):
 @app.post("/api/avatar")
 def update_avatar(a: AvatarReq):
     d = load()
-    s = next((x for x in d["students"] if x["id"] == a.id), None)
+   s = next((x for x in d["students"] if x["id"] == a.id), None)
     if s:
         s["avatar"] = a.avatar
         save(d)
     return {"ok": True}
+
+# Auto-restore from Google Sheets on startup if local file is empty/missing
+@app.on_event("startup")
+def startup_restore():
+    try:
+        d = load()
+        if not d.get("students"):
+            restored = restore_from_sheet()
+            if restored and restored.get("students"):
+                save(restored)
+                print("[startup] Restored data from Google Sheets backup")
+    except Exception as e:
+        print(f"[startup] Restore error: {e}")
 
 # Health check
 @app.get("/health")
