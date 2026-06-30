@@ -11,14 +11,14 @@ app = FastAPI()
 # CORS - cho phép frontend gọi từ mọi nguồn
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
-DATA_FILE = Path("data/scoreboard.json")
+DATA_FILE = Path("/data/scoreboard.json")
 DATA_FILE.parent.mkdir(parents=True, exist_ok=True)
 
 PASSWORD = "Vuiqua123!"
 VN_TZ = timezone(timedelta(hours=7))
 
 DEFAULT = {
-    "teacherName": "Harvey",
+    "teacherName": "",
     "students": []
 }
 
@@ -56,6 +56,7 @@ class StudentReq(BaseModel): id: str; name: str
 class ScoreReq(BaseModel): studentId: str; delta: int
 class LevelReq(BaseModel): studentId: str; skill: str; level: int; delta: int
 class RenameReq(BaseModel): id: str; name: str
+class AvatarReq(BaseModel): id: str; avatar: str
 
 # ---------- API ----------
 @app.post("/api/auth")
@@ -119,6 +120,15 @@ def rename_student(r: RenameReq):
     s = next((x for x in d["students"] if x["id"] == r.id), None)
     if s:
         s["name"] = r.name
+        save(d)
+    return {"ok": True}
+
+@app.post("/api/avatar")
+def update_avatar(a: AvatarReq):
+    d = load()
+    s = next((x for x in d["students"] if x["id"] == a.id), None)
+    if s:
+        s["avatar"] = a.avatar
         save(d)
     return {"ok": True}
 
