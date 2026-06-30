@@ -9,13 +9,12 @@ from gdrive_backup import backup_to_sheet, restore_from_sheet
 
 app = FastAPI()
 
-# CORS - allow all
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 DATA_FILE = Path("/data/scoreboard.json")
 DATA_FILE.parent.mkdir(parents=True, exist_ok=True)
 
-PASSWORD = "***"
+PASSWORD = "Vuiqua123!"
 VN_TZ = timezone(timedelta(hours=7))
 
 DEFAULT = {"students": []}
@@ -33,7 +32,6 @@ def save(data):
         json.dump(data, f, indent=2, ensure_ascii=False)
     os.replace(tmp, DATA_FILE)
 
-# ---------- Streak ----------
 def update_streak(student):
     today = datetime.now(VN_TZ).strftime("%Y-%m-%d")
     yesterday = (datetime.now(VN_TZ) - timedelta(days=1)).strftime("%Y-%m-%d")
@@ -44,16 +42,13 @@ def update_streak(student):
     student["lastActive"] = today
     student["streak"] = streak + 1 if last == yesterday else 1
 
-# ---------- Models ----------
 class AuthReq(BaseModel): password: str
 class StudentReq(BaseModel): id: str; name: str
 class ScoreReq(BaseModel): studentId: str; delta: int
 class LevelReq(BaseModel): studentId: str; skill: str; level: int; delta: int
 class RenameReq(BaseModel): id: str; name: str
 class AvatarReq(BaseModel): id: str; avatar: str
-class SaveLoadReq(BaseModel): password: str
 
-# ---------- API ----------
 @app.post("/api/auth")
 def auth(req: AuthReq):
     if req.password == PASSWORD:
@@ -127,30 +122,22 @@ def update_avatar(a: AvatarReq):
         save(d)
     return {"ok": True}
 
-# ---------- Google Sheets Save/Load (password protected) ----------
 @app.post("/api/save-to-sheet")
-def save_to_sheet(req: SaveLoadReq):
-    if req.password != PASSWORD:
-        raise HTTPException(401, "Sai mật khẩu")
+def save_to_sheet():
     d = load()
     ok = backup_to_sheet(d)
     if ok:
-        # Also save last known good state locally
-        save(d)
         return {"ok": True, "count": len(d.get("students", []))}
     raise HTTPException(500, "Google Sheets save failed")
 
 @app.post("/api/load-from-sheet")
-def load_from_sheet(req: SaveLoadReq):
-    if req.password != PASSWORD:
-        raise HTTPException(401, "Sai mật khẩu")
+def load_from_sheet():
     restored = restore_from_sheet()
     if restored:
         save(restored)
         return {"ok": True, "data": restored}
     raise HTTPException(500, "Google Sheets load failed")
 
-# Auto-restore from Google Sheets on startup
 @app.on_event("startup")
 def startup_restore():
     try:
