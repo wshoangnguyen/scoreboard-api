@@ -18,7 +18,7 @@ PASSWORD = "Vuiqua123!"
 VN_TZ = timezone(timedelta(hours=7))
 
 DEFAULT = {
-    "teacherName": "Cô Hoàng",
+    "teacherName": "Harvey",
     "students": []
 }
 
